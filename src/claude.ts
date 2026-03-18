@@ -1,7 +1,13 @@
 import { spawn } from 'child_process';
+import { createLineBuffer } from './line-buffer';
 import type { WeaveGandrInput, ClaudeStreamChunk } from './types';
 
 const DEFAULT_CWD = process.env.HOME ?? '/';
+const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_STREAM_LINE_LENGTH = 10 * 1024 * 1024; // 10MB
+const MAX_STDERR_LENGTH = 64 * 1024;
+const MAX_FALLBACK_STDOUT_LENGTH = 64 * 1024;
+const CLAUDE_ARGS = ['-p', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
 
 export async function runClaudeTask(input: WeaveGandrInput): Promise<string> {
     const prompt = buildPrompt(input);
@@ -14,24 +20,19 @@ export async function runClaudeTask(input: WeaveGandrInput): Promise<string> {
         // This avoids ARG_MAX limits, shell escaping issues, and newline
         // handling problems that arise when passing large or multi-line
         // prompts as arguments.
-        const proc = spawn(
-            'claude',
-            ['-p', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
-            {
-                cwd,
-                env: process.env,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            }
-        );
+        const proc = spawn('claude', CLAUDE_ARGS, {
+            cwd,
+            env: process.env,
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
 
-        const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
         const timeout = setTimeout(() => {
             if (!settled) {
                 proc.kill('SIGTERM');
                 reject(new Error('claude timed out after 10 minutes'));
                 settled = true;
             }
-        }, TIMEOUT_MS);
+        }, CLAUDE_TIMEOUT_MS);
 
         proc.stdin.on('error', (err) => {
             // Ignore EPIPE - the process likely exited before reading all input
@@ -43,45 +44,34 @@ export async function runClaudeTask(input: WeaveGandrInput): Promise<string> {
             }
         });
 
-        // Write prompt to stdin and close it so claude knows input is complete
-        proc.stdin.write(prompt, 'utf8');
-        proc.stdin.end();
-
-        let stdoutBuffer = '';
         let finalResult = '';
         let finalError = '';
         let errorOutput = '';
+        let fallbackOutput = '';
+        const stdoutBuffer = createLineBuffer(MAX_STREAM_LINE_LENGTH, {
+            onLine: handleStreamLine,
+            onLineTooLong: () => {
+                finalError = 'claude emitted a stream line that exceeded the maximum supported length';
+            },
+        });
 
         proc.stdout.setEncoding('utf8');
         proc.stdout.on('data', (chunk: string) => {
-            stdoutBuffer += chunk;
-
-            while (true) {
-                const idx = stdoutBuffer.indexOf('\n');
-                if (idx < 0) break;
-
-                const line = stdoutBuffer.slice(0, idx).trim();
-                stdoutBuffer = stdoutBuffer.slice(idx + 1);
-                handleStreamLine(line);
-            }
+            stdoutBuffer.push(chunk);
         });
 
         proc.stderr.setEncoding('utf8');
         proc.stderr.on('data', (chunk: string) => {
-            errorOutput += chunk;
+            errorOutput = appendCapped(errorOutput, chunk, MAX_STDERR_LENGTH);
         });
+
+        proc.stdin.end(prompt, 'utf8');
 
         proc.on('close', (code, signal) => {
             clearTimeout(timeout);
             if (settled) return;
 
-            const trailingLine = stdoutBuffer.trim();
-            if (trailingLine) {
-                handleStreamLine(trailingLine);
-                if (finalResult || finalError) {
-                    stdoutBuffer = '';
-                }
-            }
+            stdoutBuffer.flush();
 
             if (code !== 0) {
                 const message =
@@ -98,7 +88,7 @@ export async function runClaudeTask(input: WeaveGandrInput): Promise<string> {
                 return;
             }
             settled = true;
-            resolve(finalResult || stdoutBuffer.trim());
+            resolve(finalResult !== '' ? finalResult : fallbackOutput.trim());
         });
 
         proc.on('error', (err) => {
@@ -122,7 +112,7 @@ export async function runClaudeTask(input: WeaveGandrInput): Promise<string> {
                     finalError = result.text;
                 }
             } catch {
-                // Non-JSON line — ignore
+                fallbackOutput = appendCapped(fallbackOutput, `${line}\n`, MAX_FALLBACK_STDOUT_LENGTH);
             }
         }
     });
@@ -133,6 +123,22 @@ function buildPrompt(input: WeaveGandrInput): string {
         return input.prompt;
     }
     return `Context from conversation:\n---\n${input.context}\n---\n\nTask: ${input.prompt}`;
+}
+
+const TRUNCATION_MARKER = '\n[gandr] output truncated.';
+
+function appendCapped(current: string, nextChunk: string, maxLength: number): string {
+    if (current.length >= maxLength) {
+        return current;
+    }
+
+    const remainingLength = maxLength - current.length;
+    if (nextChunk.length <= remainingLength) {
+        return current + nextChunk;
+    }
+
+    const effectiveRemaining = Math.max(0, remainingLength - TRUNCATION_MARKER.length);
+    return `${current}${nextChunk.slice(0, effectiveRemaining)}${TRUNCATION_MARKER}`;
 }
 
 function extractResult(chunk: ClaudeStreamChunk): { kind: 'success' | 'error'; text: string } | null {

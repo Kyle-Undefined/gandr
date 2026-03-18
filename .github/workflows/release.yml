@@ -14,8 +14,6 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
 
             - name: Ensure tag commit is on main
               run: |
@@ -127,6 +125,11 @@ jobs:
                   cd dist
                   sha256sum gandr-linux-x64 gandr-linux-arm64 > gandr-checksums.txt
 
+            - name: Render pinned installer
+              run: |
+                  sed "s|__GANDR_RELEASE_REF__|${GITHUB_REF_NAME}|g" install.sh > dist/install.sh
+                  chmod +x dist/install.sh
+
             - name: Publish release
               uses: softprops/action-gh-release@v2
               with:
@@ -137,4 +140,4 @@ jobs:
                       dist/gandr-linux-x64
                       dist/gandr-linux-arm64
                       dist/gandr-checksums.txt
-                      install.sh
+                      dist/install.sh

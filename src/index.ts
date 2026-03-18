@@ -1,15 +1,7 @@
-import { createInterface } from 'readline';
-import { runClaudeTask } from './claude';
+import { executeToolCall, TOOL_DEFINITIONS } from './tools';
 import { GANDR_VERSION } from './version';
-import type {
-    McpRequest,
-    McpResponse,
-    InitializeResult,
-    ToolsListResult,
-    ToolCallResult,
-    ToolCallParams,
-} from './types';
-import { isWeaveGandrInput } from './types';
+import { createLineBuffer } from './line-buffer';
+import type { McpRequest, McpResponse, InitializeResult, ToolsListResult, ToolCallParams } from './types';
 
 // ─── Args ─────────────────────────────────────────────────────────────────────
 
@@ -29,28 +21,57 @@ if (args.includes('--healthcheck')) {
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
 const MAX_LINE_LENGTH = 10 * 1024 * 1024; // 10MB
+let processingQueue = Promise.resolve();
+let shutdownPromise: Promise<void> | null = null;
 
-const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-
-rl.on('line', (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    if (trimmed.length > MAX_LINE_LENGTH) {
+const lineBuffer = createLineBuffer(MAX_LINE_LENGTH, {
+    onLine: (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        processingQueue = processingQueue
+            .then(() => handleLine(trimmed))
+            .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                process.stderr.write(`[gandr] Unhandled line processing error: ${message}\n`);
+            });
+    },
+    onLineTooLong: () => {
         process.stderr.write('[gandr] Line exceeded max length, ignoring.\n');
-        return;
-    }
-    void handleLine(trimmed);
+    },
 });
 
-rl.on('close', () => {
-    process.exit(0);
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk: string) => {
+    lineBuffer.push(chunk);
+});
+
+process.stdin.on('end', () => {
+    void finalizeServer(true);
 });
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 function shutdown(): void {
-    process.exit(0);
+    void finalizeServer(false);
+}
+
+function finalizeServer(flushPendingLine: boolean): Promise<void> {
+    if (!shutdownPromise) {
+        shutdownPromise = (async () => {
+            if (flushPendingLine) {
+                lineBuffer.flush();
+            }
+
+            await processingQueue.catch(() => {
+                // Queue errors are already reported when they happen.
+            });
+        })().finally(() => {
+            process.exit(0);
+        });
+    }
+
+    return shutdownPromise;
 }
 
 // ─── Line Handler ─────────────────────────────────────────────────────────────
@@ -69,7 +90,8 @@ async function handleLine(line: string): Promise<void> {
         return;
     }
 
-    const { id, method } = request;
+    const { id: rawId, method } = request;
+    const id = rawId ?? null;
 
     try {
         switch (method) {
@@ -85,16 +107,20 @@ async function handleLine(line: string): Promise<void> {
                 await handleToolCall(id, request.params);
                 break;
             default:
-                writeError(id, -32601, `Method not found: ${method}`);
+                if (id !== null) {
+                    writeError(id, -32601, `Method not found: ${method}`);
+                }
         }
     } catch (err) {
-        writeError(id, -32603, err instanceof Error ? err.message : String(err));
+        if (id !== null) {
+            writeError(id, -32603, err instanceof Error ? err.message : String(err));
+        }
     }
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-function handleInitialize(id: string | number): void {
+function handleInitialize(id: string | number | null): void {
     const result: InitializeResult = {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {
@@ -108,75 +134,39 @@ function handleInitialize(id: string | number): void {
     writeResult(id, result);
 }
 
-function handleToolsList(id: string | number): void {
+function handleToolsList(id: string | number | null): void {
     const result: ToolsListResult = {
-        tools: [
-            {
-                name: 'gandr',
-                description:
-                    'Weave a task through Gandr to Claude Code running in WSL. Claude Code has full access to the Linux environment, filesystem, shell tools, and all configurations. Use this for any coding, file editing, shell execution, or agentic tasks.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        prompt: {
-                            type: 'string',
-                            description: 'The task to perform.',
-                        },
-                        cwd: {
-                            type: 'string',
-                            description:
-                                'Working directory inside WSL to run the task in. Defaults to the user home directory if not provided.',
-                        },
-                        context: {
-                            type: 'string',
-                            description:
-                                'Optional background context from the conversation to help Claude Code understand the task. Include relevant prior decisions, architecture notes, or multi-step plan details.',
-                        },
-                    },
-                    required: ['prompt'],
-                },
-            },
-        ],
+        tools: TOOL_DEFINITIONS,
     };
     writeResult(id, result);
 }
 
-async function handleToolCall(id: string | number, params: unknown): Promise<void> {
+async function handleToolCall(id: string | number | null, params: unknown): Promise<void> {
     if (!isToolCallParams(params)) {
-        writeError(id, -32602, 'Invalid tool call params');
+        if (id !== null) {
+            writeError(id, -32602, 'Invalid tool call params');
+        }
         return;
     }
 
-    if (params.name !== 'gandr') {
-        writeError(id, -32602, `Unknown tool: ${params.name}`);
+    const outcome = await executeToolCall(params);
+    if (outcome.kind === 'error') {
+        if (id !== null) {
+            writeError(id, outcome.code, outcome.message);
+        }
         return;
     }
 
-    if (!isWeaveGandrInput(params.arguments)) {
-        writeError(id, -32602, 'Invalid arguments for gandr');
+    if (id === null) {
         return;
     }
 
-    const task = runClaudeTask(params.arguments);
-
-    try {
-        const output = await task;
-        const result: ToolCallResult = {
-            content: [{ type: 'text', text: output }],
-        };
-        writeResult(id, result);
-    } catch (err) {
-        const result: ToolCallResult = {
-            content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }],
-            isError: true,
-        };
-        writeResult(id, result);
-    }
+    writeResult(id, outcome.result);
 }
 
 // ─── Writers ──────────────────────────────────────────────────────────────────
 
-function writeResult(id: string | number, result: unknown): void {
+function writeResult(id: string | number | null, result: unknown): void {
     const response: McpResponse = { jsonrpc: '2.0', id, result };
     writeLine(response);
 }
@@ -194,7 +184,7 @@ function writeLine(value: unknown): void {
     try {
         process.stdout.write(`${JSON.stringify(value)}\n`);
     } catch {
-        // Ignore write errors — stdout may be closed during shutdown
+        // Ignore write errors - stdout may be closed during shutdown
     }
 }
 
@@ -206,7 +196,7 @@ function isMcpRequest(value: unknown): value is McpRequest {
     return (
         v.jsonrpc === '2.0' &&
         typeof v.method === 'string' &&
-        (typeof v.id === 'string' || typeof v.id === 'number' || v.id === undefined)
+        (typeof v.id === 'string' || typeof v.id === 'number' || v.id === null || v.id === undefined)
     );
 }
 

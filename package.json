@@ -1,6 +1,6 @@
 {
     "name": "gandr",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "Gandr is a WSL bridge for Claude Desktop, routing MCP tool calls to Claude Code in Linux.",
     "scripts": {
         "build": "bun run scripts/build.ts",
@@ -11,7 +11,7 @@
         "format:check": "prettier --check .",
         "lint": "oxlint",
         "lint:fix": "oxlint --fix",
-        "version:bump": "bumpp --quiet --release",
+        "version:bump": "bumpp --quiet --release --no-commit",
         "healthcheck": "bun run src/index.ts --healthcheck",
         "version": "bun run src/index.ts --version"
     },

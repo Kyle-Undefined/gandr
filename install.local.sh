@@ -43,7 +43,7 @@ bun run scripts/build.ts --arch "$BUILD_ARCH"
 BINARY_PATH="$REPO_DIR/dist/gandr-linux-$BUILD_ARCH"
 
 if [ ! -f "$BINARY_PATH" ]; then
-    echo "[gandr] Build failed — binary not found at $BINARY_PATH"
+    echo "[gandr] Build failed - binary not found at $BINARY_PATH"
     exit 1
 fi
 
@@ -60,9 +60,17 @@ WEAVER_NAME="gandr-weaver"
 WEAVER_PATH="$INSTALL_DIR/$WEAVER_NAME"
 cat > "$WEAVER_PATH" << WEAVER
 #!/usr/bin/env bash
-source ~/.bashrc 2>/dev/null || true
-source ~/.profile 2>/dev/null || true
-exec $HOME/.local/bin/gandr "\$@"
+set -euo pipefail
+
+if [ -f "\$HOME/.profile" ]; then
+    . "\$HOME/.profile" </dev/null >/dev/null 2>&1 || true
+fi
+
+if [ -f "\$HOME/.bashrc" ]; then
+    . "\$HOME/.bashrc" </dev/null >/dev/null 2>&1 || true
+fi
+
+exec "\$HOME/.local/bin/gandr" "\$@"
 WEAVER
 chmod +x "$WEAVER_PATH"
 echo "[gandr] Installed weaver to $WEAVER_PATH"

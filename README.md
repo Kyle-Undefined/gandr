@@ -4,9 +4,11 @@
 
 Gandr is a WSL bridge for Claude Desktop on Windows.
 
-It works as an MCP server, **not** a native Claude Desktop integration. Claude Desktop communicates with Gandr through the Model Context Protocol over stdio, and Gandr exposes a single tool that delegates tasks to Claude Code running inside WSL. From Claude Desktop's perspective, Gandr is just an MCP tool it can call.
+It works as an MCP server, **not** a native Claude Desktop integration. Claude Desktop communicates with Gandr through the Model Context Protocol over stdio, and Gandr exposes a set of tools; one that delegates tasks to Claude Code running inside WSL, and several that operate on the WSL filesystem and network directly. From Claude Desktop's perspective, Gandr is just a collection of MCP tools it can call.
 
 This is not Claude Desktop running natively in WSL. It is Claude Desktop on Windows making MCP tool calls that get routed into WSL through Gandr.
+
+The Claude Desktop Code tab attempts to run Claude Code natively on Windows and does not route through Gandr or WSL. It will not work with this setup. Use the chat tab for all tasks.
 
 ## Why Gandr
 
@@ -25,7 +27,7 @@ The name comes from Old Norse _gandr_, a magical conduit or channel. It shares i
 - `claude` available on your WSL `PATH`
 - [Bun](https://bun.sh) installed in WSL if you want to build from source
 
-The install flow targets whichever WSL distro you run it from. Ubuntu 24.04 is used as a fallback if the distro cannot be detected.
+The install flow targets whichever WSL distro you run it from. Ubuntu is used as a fallback if the distro cannot be detected.
 
 ## What Gandr does
 
@@ -71,47 +73,67 @@ The installer will:
 
 Then add or update that `gandr` entry in Claude Desktop's config manually.
 
-Restart Claude Desktop after installation.
+Restart Claude Desktop fully after installation.
 
 ## Install from GitHub release
 
 Use this if you want a prebuilt binary instead of building from source.
 
+If you want the newest release directly from GitHub, you can use:
+
 ```bash
 curl -fsSL https://github.com/kyle-undefined/gandr/releases/latest/download/install.sh | bash
 ```
 
-This downloads the latest released binary for your architecture and installs it into your WSL environment.
+That release-hosted installer is already pinned to the matching release version and verifies the downloaded binary against `gandr-checksums.txt` before installing.
+
+If you want to pin a specific release explicitly, you can do:
+
+```bash
+VERSION=1.0.0
+curl -fsSL "https://github.com/kyle-undefined/gandr/releases/download/${VERSION}/install.sh" | GANDR_VERSION="$VERSION" bash
+```
+
+That installs the exact version you specify and still verifies against `gandr-checksums.txt`.
 
 The installer prints the `gandr` MCP server entry you should add to `%APPDATA%\Claude\claude_desktop_config.json`.
 
-Restart Claude Desktop after installation.
+Restart Claude Desktop fully after installation.
 
 ## Quick start
 
 1. Install Gandr from source or from a release.
 2. Confirm `claude` works inside your WSL distro.
-3. Restart Claude Desktop on Windows.
+3. Restart Claude Desktop fully on Windows.
 4. Open a conversation in Claude Desktop.
-5. Let Claude use the Gandr MCP tool when it needs to code, edit files, or run shell commands.
+5. Let Claude use the Gandr MCP tools when it needs to code, edit files, or run shell commands.
 
 Once installed, Gandr is mostly transparent. You keep using Claude Desktop normally, and execution gets routed into WSL through Claude Code.
 
-## Exposed tool
+## Exposed tools
 
-Gandr currently exposes one MCP tool:
+### Bridge
 
-- `gandr`
+| Tool    | Description                                        |
+| ------- | -------------------------------------------------- |
+| `gandr` | Weave a task through to Claude Code running in WSL |
 
-Tool input:
+### Direct (no Claude Code needed)
 
-| Parameter | Type   | Required | Description                                                         |
-| --------- | ------ | -------- | ------------------------------------------------------------------- |
-| `prompt`  | string | Yes      | The task to run through Claude Code                                 |
-| `cwd`     | string | No       | Working directory inside WSL. Defaults to the user's home directory |
-| `context` | string | No       | Additional background context from the Claude Desktop conversation  |
+| Tool          | Description                                            |
+| ------------- | ------------------------------------------------------ |
+| `read_file`   | Read a file from the WSL filesystem                    |
+| `write_file`  | Write or overwrite a file in the WSL filesystem        |
+| `append_file` | Append content to a file (creates if missing)          |
+| `patch_file`  | Replace a unique string in a file (exactly-once match) |
+| `list_dir`    | List directory contents                                |
+| `delete_file` | Delete a file                                          |
+| `delete_dir`  | Delete a directory recursively                         |
+| `move_file`   | Move or rename a file or directory                     |
+| `file_exists` | Check whether a file or directory exists               |
+| `create_dir`  | Create a directory (recursive)                         |
 
-Claude Desktop handles the MCP call itself. In normal use, you do not manually invoke this tool.
+Claude Desktop handles the MCP calls itself. In normal use, you do not manually invoke these tools.
 
 ## Hooks and environment
 
@@ -127,6 +149,7 @@ If you already use Claude Code hooks such as `PreToolUse`, they continue to run 
 ## Runtime, privacy, and safety notes
 
 - Gandr gives Claude Code access to your WSL environment, not a restricted sandbox
+- The bridge intentionally invokes Claude Code with `--dangerously-skip-permissions`; this is part of the design, so only run Gandr in a WSL environment you trust
 - Claude Code may read or write files that your WSL user can access
 - Gandr itself is a bridge layer; it does not bundle a model
 - Gandr does not provide extra policy enforcement beyond whatever Claude Desktop, Claude Code, or your own environment already enforce
