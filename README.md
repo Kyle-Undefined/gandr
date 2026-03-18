@@ -75,7 +75,7 @@ The installer will:
 
 Then add or update that `gandr` entry in Claude Desktop's config manually.
 
-Restart Claude Desktop fully after installation.
+You can rerun the installer to update Gandr even while Claude Desktop is open. The install should still succeed, but Claude Desktop must be fully restarted before it picks up the new binary.
 
 ## Install from GitHub release
 
@@ -100,7 +100,7 @@ That installs the exact version you specify and still verifies against `gandr-ch
 
 The installer prints the `gandr` MCP server entry you should add to `%APPDATA%\Claude\claude_desktop_config.json`.
 
-Restart Claude Desktop fully after installation.
+You can rerun the installer to update Gandr even while Claude Desktop is open. The install should still succeed, but Claude Desktop must be fully restarted before it picks up the new binary.
 
 ## Quick start
 
@@ -122,18 +122,21 @@ Once installed, Gandr is mostly transparent. You keep using Claude Desktop norma
 
 ### Direct (no Claude Code needed)
 
-| Tool          | Description                                            |
-| ------------- | ------------------------------------------------------ |
-| `read_file`   | Read a file from the WSL filesystem                    |
-| `write_file`  | Write or overwrite a file in the WSL filesystem        |
-| `append_file` | Append content to a file (creates if missing)          |
-| `patch_file`  | Replace a unique string in a file (exactly-once match) |
-| `list_dir`    | List directory contents                                |
-| `delete_file` | Delete a file                                          |
-| `delete_dir`  | Delete a directory recursively                         |
-| `move_file`   | Move or rename a file or directory                     |
-| `file_exists` | Check whether a file or directory exists               |
-| `create_dir`  | Create a directory (recursive)                         |
+| Tool            | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `read_file`     | Read a file from the WSL filesystem                    |
+| `write_file`    | Write or overwrite a file in the WSL filesystem        |
+| `append_file`   | Append content to a file (creates if missing)          |
+| `patch_file`    | Replace a unique string in a file (exactly-once match) |
+| `list_dir`      | List directory contents                                |
+| `delete_file`   | Delete a file                                          |
+| `delete_dir`    | Delete a directory recursively                         |
+| `move_file`     | Move or rename a file or directory                     |
+| `file_exists`   | Check whether a file or directory exists               |
+| `create_dir`    | Create a directory (recursive)                         |
+| `copy_file`     | Copy a file                                            |
+| `read_dir_tree` | Recursively list a directory tree with file sizes      |
+| `search_files`  | Search for files matching a glob pattern recursively   |
 
 Claude Desktop handles the MCP calls itself. In normal use, you do not manually invoke these tools.
 
@@ -164,6 +167,12 @@ If you already use Claude Code hooks such as `PreToolUse`, they continue to run 
 Check `%APPDATA%\Claude\claude_desktop_config.json` on Windows and confirm it contains a `gandr` entry under `mcpServers`.
 
 Then restart Claude Desktop fully.
+
+### Updating while Claude Desktop is open
+
+If Claude Desktop already has Gandr running, reinstalling replaces the binary on disk but does not swap out the already-running process.
+
+Claude Desktop must be fully restarted before it picks up the new binary.
 
 ### `claude` is not found
 

@@ -6,6 +6,8 @@ BINARY_NAME="gandr"
 WEAVER_NAME="gandr-weaver"
 REPO="kyle-undefined/gandr"
 RELEASE_REF="${GANDR_VERSION:-__GANDR_RELEASE_REF__}"
+TEMP_FILES=()
+GANDR_WAS_BUSY=0
 
 if [ "$RELEASE_REF" = "__GANDR_RELEASE_REF__" ]; then
     echo "[gandr] install.sh is a release-installer template." >&2
@@ -13,6 +15,61 @@ if [ "$RELEASE_REF" = "__GANDR_RELEASE_REF__" ]; then
     echo "[gandr] You can also set GANDR_VERSION explicitly when testing this template." >&2
     exit 1
 fi
+
+cleanup() {
+    if [ "${#TEMP_FILES[@]}" -eq 0 ]; then
+        return
+    fi
+
+    rm -f "${TEMP_FILES[@]}"
+}
+
+trap cleanup EXIT
+
+make_temp_path() {
+    local stem="$1"
+    mktemp "$INSTALL_DIR/.${stem}.XXXXXX"
+}
+
+detect_running_binary() {
+    local target="$1"
+
+    if [ ! -e "$target" ]; then
+        return 1
+    fi
+
+    if ! command -v fuser >/dev/null 2>&1; then
+        # fuser unavailable; assume not busy
+        return 1
+    fi
+
+    fuser "$target" >/dev/null 2>&1
+}
+
+move_into_place() {
+    local source_path="$1"
+    local target_path="$2"
+
+    if ! mv -f "$source_path" "$target_path"; then
+        echo "[gandr] Failed to replace $target_path"
+        echo "[gandr] Close Claude Desktop and retry the install."
+        exit 1
+    fi
+}
+
+write_file_atomically() {
+    local target_path="$1"
+    local label="$2"
+    local temp_path
+
+    temp_path="$(make_temp_path "$label")"
+    TEMP_FILES+=("$temp_path")
+
+    cat > "$temp_path"
+    chmod +x "$temp_path"
+
+    move_into_place "$temp_path" "$target_path"
+}
 
 print_claude_desktop_config_instructions() {
     local wsl_distro="$1"
@@ -46,14 +103,8 @@ esac
 
 # ─── Download binary ──────────────────────────────────────────────────────────
 
-BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
 CHECKSUMS_PATH="$(mktemp)"
-
-cleanup() {
-    rm -f "$CHECKSUMS_PATH"
-}
-
-trap cleanup EXIT
+TEMP_FILES+=("$CHECKSUMS_PATH")
 
 BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_REF}"
 BINARY_URL="${BASE_URL}/gandr-linux-${BUILD_ARCH}"
@@ -66,7 +117,14 @@ curl -fsSL --connect-timeout 10 --max-time 60 "$BINARY_CHECKSUMS_URL" -o "$CHECK
 
 echo "[gandr] Downloading gandr-linux-${BUILD_ARCH} for ${RELEASE_REF}..."
 mkdir -p "$INSTALL_DIR"
-curl -fsSL --connect-timeout 10 --max-time 300 "$BINARY_URL" -o "$BINARY_PATH"
+BINARY_TMP_PATH="$(make_temp_path "$BINARY_NAME")"
+TEMP_FILES+=("$BINARY_TMP_PATH")
+
+if detect_running_binary "$INSTALL_DIR/$BINARY_NAME"; then
+    GANDR_WAS_BUSY=1
+fi
+
+curl -fsSL --connect-timeout 10 --max-time 300 "$BINARY_URL" -o "$BINARY_TMP_PATH"
 
 EXPECTED_SHA="$(awk '/ gandr-linux-'"${BUILD_ARCH}"'$/ { print $1 }' "$CHECKSUMS_PATH")"
 if [ -z "$EXPECTED_SHA" ]; then
@@ -74,20 +132,21 @@ if [ -z "$EXPECTED_SHA" ]; then
     exit 1
 fi
 
-ACTUAL_SHA="$(sha256sum "$BINARY_PATH" | awk '{ print $1 }')"
+ACTUAL_SHA="$(sha256sum "$BINARY_TMP_PATH" | awk '{ print $1 }')"
 if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
-    echo "[gandr] Checksum verification failed for $BINARY_PATH"
+    echo "[gandr] Checksum verification failed for $BINARY_TMP_PATH"
     exit 1
 fi
 
-chmod +x "$BINARY_PATH"
-echo "[gandr] Verified checksum for $BINARY_PATH"
-echo "[gandr] Installed binary to $BINARY_PATH"
+chmod +x "$BINARY_TMP_PATH"
+move_into_place "$BINARY_TMP_PATH" "$INSTALL_DIR/$BINARY_NAME"
+echo "[gandr] Verified checksum for $INSTALL_DIR/$BINARY_NAME"
+echo "[gandr] Installed binary to $INSTALL_DIR/$BINARY_NAME"
 
 # ─── Install weaver ───────────────────────────────────────────────────────────
 
 WEAVER_PATH="$INSTALL_DIR/$WEAVER_NAME"
-cat > "$WEAVER_PATH" << WEAVER
+write_file_atomically "$WEAVER_PATH" "$WEAVER_NAME" << WEAVER
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -101,7 +160,6 @@ fi
 
 exec "\$HOME/.local/bin/gandr" "\$@"
 WEAVER
-chmod +x "$WEAVER_PATH"
 echo "[gandr] Installed weaver to $WEAVER_PATH"
 
 # ─── Print Claude Desktop config instructions ────────────────────────────────
@@ -119,5 +177,10 @@ print_claude_desktop_config_instructions "$WSL_DISTRO" "$WEAVER_WSL_PATH"
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "✓ Gandr $("$BINARY_PATH" --version) installed successfully."
-echo "  Restart Claude Desktop after updating the config."
+echo "✓ Gandr $("$INSTALL_DIR/$BINARY_NAME" --version) installed successfully."
+if [ "$GANDR_WAS_BUSY" -eq 1 ]; then
+    echo "  Claude Desktop is still using the previous gandr process."
+    echo "  Fully quit and reopen Claude Desktop to activate the new version."
+else
+    echo "  Restart Claude Desktop after updating the config."
+fi

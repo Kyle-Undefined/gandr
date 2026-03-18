@@ -4,6 +4,75 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY_NAME="gandr"
+WEAVER_NAME="gandr-weaver"
+TEMP_FILES=()
+GANDR_WAS_BUSY=0
+
+cleanup() {
+    if [ "${#TEMP_FILES[@]}" -eq 0 ]; then
+        return
+    fi
+
+    rm -f "${TEMP_FILES[@]}"
+}
+
+trap cleanup EXIT
+
+make_temp_path() {
+    local stem="$1"
+    mktemp "$INSTALL_DIR/.${stem}.XXXXXX"
+}
+
+detect_running_binary() {
+    local target="$1"
+
+    if [ ! -e "$target" ]; then
+        return 1
+    fi
+
+    if ! command -v fuser >/dev/null 2>&1; then
+        return 1
+    fi
+
+    fuser "$target" >/dev/null 2>&1
+}
+
+replace_file_atomically() {
+    local source_path="$1"
+    local target_path="$2"
+    local label="$3"
+    local temp_path
+
+    temp_path="$(make_temp_path "$label")"
+    TEMP_FILES+=("$temp_path")
+
+    cp "$source_path" "$temp_path"
+    chmod +x "$temp_path"
+
+    if ! mv -f "$temp_path" "$target_path"; then
+        echo "[gandr] Failed to replace $target_path"
+        echo "[gandr] Close Claude Desktop and retry the install."
+        exit 1
+    fi
+}
+
+write_file_atomically() {
+    local target_path="$1"
+    local label="$2"
+    local temp_path
+
+    temp_path="$(make_temp_path "$label")"
+    TEMP_FILES+=("$temp_path")
+
+    cat > "$temp_path"
+    chmod +x "$temp_path"
+
+    if ! mv -f "$temp_path" "$target_path"; then
+        echo "[gandr] Failed to replace $target_path"
+        echo "[gandr] Close Claude Desktop and retry the install."
+        exit 1
+    fi
+}
 
 print_claude_desktop_config_instructions() {
     local wsl_distro="$1"
@@ -50,15 +119,18 @@ fi
 # ─── Install binary ───────────────────────────────────────────────────────────
 
 mkdir -p "$INSTALL_DIR"
-cp "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
-chmod +x "$INSTALL_DIR/$BINARY_NAME"
+
+if detect_running_binary "$INSTALL_DIR/$BINARY_NAME"; then
+    GANDR_WAS_BUSY=1
+fi
+
+replace_file_atomically "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME" "$BINARY_NAME"
 echo "[gandr] Installed binary to $INSTALL_DIR/$BINARY_NAME"
 
 # ─── Install weaver ───────────────────────────────────────────────────────────
 
-WEAVER_NAME="gandr-weaver"
 WEAVER_PATH="$INSTALL_DIR/$WEAVER_NAME"
-cat > "$WEAVER_PATH" << WEAVER
+write_file_atomically "$WEAVER_PATH" "$WEAVER_NAME" << WEAVER
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -72,7 +144,6 @@ fi
 
 exec "\$HOME/.local/bin/gandr" "\$@"
 WEAVER
-chmod +x "$WEAVER_PATH"
 echo "[gandr] Installed weaver to $WEAVER_PATH"
 
 # ─── Print Claude Desktop config instructions ────────────────────────────────
@@ -81,7 +152,7 @@ if [ -z "${WSL_DISTRO_NAME:-}" ]; then
     echo "[gandr] Warning: WSL_DISTRO_NAME not set, defaulting to 'Ubuntu-24.04'"
     echo "[gandr] If this is incorrect, set WSL_DISTRO_NAME before running this script."
 fi
-WSL_DISTRO="${WSL_DISTRO_NAME:-Ubuntu-24.04}"
+WSL_DISTRO="${WSL_DISTRO_NAME:-Ubuntu}"
 
 echo ""
 print_claude_desktop_config_instructions "$WSL_DISTRO" "$WEAVER_PATH"
@@ -90,4 +161,9 @@ print_claude_desktop_config_instructions "$WSL_DISTRO" "$WEAVER_PATH"
 
 echo ""
 echo "✓ Gandr $("$INSTALL_DIR/$BINARY_NAME" --version) installed successfully."
-echo "  Restart Claude Desktop after updating the config."
+if [ "$GANDR_WAS_BUSY" -eq 1 ]; then
+    echo "  Claude Desktop is still using the previous gandr process."
+    echo "  Fully quit and reopen Claude Desktop to activate the new version."
+else
+    echo "  Restart Claude Desktop after updating the config."
+fi

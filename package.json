@@ -1,7 +1,7 @@
 {
 	"name": "gandr",
-	"version": "0.0.4",
-	"description": "Gandr is a WSL bridge for Claude Desktop, routing MCP tool calls to Claude Code in Linux.",
+	"version": "0.0.5",
+	"description": "A WSL bridge for Claude Desktop on Windows that routes MCP tool calls into Claude Code running inside Linux.",
 	"scripts": {
 		"build": "bun run scripts/build.ts",
 		"build:x64": "bun run scripts/build.ts --arch x64",
