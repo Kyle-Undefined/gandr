@@ -11,7 +11,7 @@
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint",
 		"lint:fix": "oxlint --fix",
-		"version:bump": "bumpp --quiet --release --no-commit",
+		"version:bump": "bumpp --quiet --release",
 		"healthcheck": "bun run src/index.ts --healthcheck",
 		"version": "bun run src/index.ts --version"
 	},
