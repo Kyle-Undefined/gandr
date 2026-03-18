@@ -4,7 +4,9 @@
 
 Gandr is a WSL bridge for Claude Desktop on Windows.
 
-It works as an MCP server, **not** a native Claude Desktop integration. Claude Desktop communicates with Gandr through the Model Context Protocol over stdio, and Gandr exposes a set of tools; one that delegates tasks to Claude Code running inside WSL, and several that operate on the WSL filesystem and network directly. From Claude Desktop's perspective, Gandr is just a collection of MCP tools it can call.
+It works as an MCP server, **not** a native Claude Desktop integration. Claude Desktop communicates with Gandr through the Model Context Protocol over stdio, and Gandr exposes a set of tools; one that delegates tasks to Claude Code running inside WSL, and several that operate on the WSL filesystem directly.
+
+When Gandr delegates a task, it spawns Claude Code in non-interactive print mode (`claude -p`), writes the prompt over `stdin`, and streams the result back to Claude Desktop.
 
 This is not Claude Desktop running natively in WSL. It is Claude Desktop on Windows making MCP tool calls that get routed into WSL through Gandr.
 
