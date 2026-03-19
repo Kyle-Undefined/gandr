@@ -190,7 +190,8 @@ const toolEntries = [
 					},
 					end_line: {
 						type: 'number',
-						description: 'Last line number to include. Must be a positive integer and at least start_line.',
+						description:
+							'Last line number to include. Must be a positive integer. Values smaller than start_line return a descriptive error.',
 					},
 				},
 				required: ['path', 'start_line', 'end_line'],
@@ -566,7 +567,8 @@ const toolEntries = [
 					},
 					case_sensitive: {
 						type: 'boolean',
-						description: 'Whether matching should be case-sensitive. Defaults to false.',
+						description:
+							'Whether matching should be case-sensitive. Defaults to false. In regex mode, character classes like [A-Z] also follow this flag.',
 					},
 					is_regex: {
 						type: 'boolean',

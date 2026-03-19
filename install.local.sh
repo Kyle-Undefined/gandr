@@ -149,7 +149,7 @@ echo "[gandr] Installed weaver to $WEAVER_PATH"
 # ─── Print Claude Desktop config instructions ────────────────────────────────
 
 if [ -z "${WSL_DISTRO_NAME:-}" ]; then
-    echo "[gandr] Warning: WSL_DISTRO_NAME not set, defaulting to 'Ubuntu-24.04'"
+    echo "[gandr] Warning: WSL_DISTRO_NAME not set, defaulting to 'Ubuntu'"
     echo "[gandr] If this is incorrect, set WSL_DISTRO_NAME before running this script."
 fi
 WSL_DISTRO="${WSL_DISTRO_NAME:-Ubuntu}"

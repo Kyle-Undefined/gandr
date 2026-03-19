@@ -1,6 +1,6 @@
 {
 	"name": "gandr",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"description": "A WSL bridge for Claude Desktop on Windows that routes MCP tool calls into Claude Code running inside Linux.",
 	"scripts": {
 		"build": "bun run scripts/build.ts",

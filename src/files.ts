@@ -22,6 +22,10 @@ export async function readFileFromWSL(path: string): Promise<string> {
 }
 
 export async function readFileRangeFromWSL(path: string, startLine: number, endLine: number): Promise<string> {
+	if (endLine < startLine) {
+		throw new Error(`end_line ${endLine} must be greater than or equal to start_line ${startLine}`);
+	}
+
 	const content = await withFilesystemError(() => readFile(path, 'utf8'), 'Failed to read file');
 	if (content.length === 0) {
 		throw new Error(`start_line ${startLine} is beyond end of file (0 lines)`);
@@ -184,7 +188,7 @@ export async function readDirTreeInWSL(path: string, maxDepth?: number): Promise
 	const lines: string[] = [];
 
 	async function walk(dir: string, prefix: string, depth: number): Promise<void> {
-		if (maxDepth !== undefined && depth > maxDepth) return;
+		if (maxDepth !== undefined && depth >= maxDepth) return;
 
 		let entries;
 		try {

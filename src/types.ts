@@ -133,10 +133,7 @@ export function isReadFileRangeInput(value: unknown): value is ReadFileRangeInpu
 	if (!v || !isNonEmptyString(v.path)) {
 		return false;
 	}
-	if (!isIntegerInRange(v.start_line, 1) || !isIntegerInRange(v.end_line, 1)) {
-		return false;
-	}
-	return v.end_line >= v.start_line;
+	return isIntegerInRange(v.start_line, 1) && isIntegerInRange(v.end_line, 1);
 }
 
 export type WriteFileInput = {
