@@ -25,6 +25,12 @@ type AuthStatusJson = {
 export function runDoctor(): number {
 	const checks: DoctorCheck[] = [];
 
+	checks.push({
+		status: 'WARN',
+		label: 'Claude Desktop config',
+		detail: 'manual step required; verify %APPDATA%\\Claude\\claude_desktop_config.json on Windows',
+	});
+
 	const home = process.env.HOME;
 	const homeCheck = checkHome(home);
 	checks.push(homeCheck);
