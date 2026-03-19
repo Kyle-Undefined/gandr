@@ -1,4 +1,5 @@
 import { runClaudeTask } from './claude';
+import type { Logger } from './logger';
 import {
 	appendFileToWSL,
 	copyFileInWSL,
@@ -6,12 +7,15 @@ import {
 	deleteDirFromWSL,
 	deleteFileFromWSL,
 	fileExistsInWSL,
+	grepContentInWSL,
 	listDirInWSL,
 	moveFileInWSL,
 	patchFileInWSL,
+	readFileRangeFromWSL,
 	readDirTreeInWSL,
 	readFileFromWSL,
 	searchFilesInWSL,
+	statPathInWSL,
 	writeFileToWSL,
 } from './files';
 import type {
@@ -21,12 +25,15 @@ import type {
 	DeleteDirInput,
 	DeleteFileInput,
 	FileExistsInput,
+	GrepContentInput,
 	ListDirInput,
 	MoveFileInput,
 	PatchFileInput,
 	ReadDirTreeInput,
 	ReadFileInput,
+	ReadFileRangeInput,
 	SearchFilesInput,
+	StatPathInput,
 	ToolCallParams,
 	ToolCallResult,
 	ToolDefinition,
@@ -40,15 +47,23 @@ import {
 	isDeleteDirInput,
 	isDeleteFileInput,
 	isFileExistsInput,
+	isGrepContentInput,
 	isListDirInput,
 	isMoveFileInput,
 	isPatchFileInput,
 	isReadDirTreeInput,
 	isReadFileInput,
+	isReadFileRangeInput,
 	isSearchFilesInput,
+	isStatPathInput,
 	isWeaveGandrInput,
 	isWriteFileInput,
 } from './types';
+
+export type ToolExecutionContext = {
+	logger: Logger;
+	claudeTimeoutMs: number | null;
+};
 
 type ToolEntry<TInput extends Record<string, unknown>> = {
 	definition: ToolDefinition;
@@ -56,7 +71,7 @@ type ToolEntry<TInput extends Record<string, unknown>> = {
 	absolutePathKeys?: readonly (keyof TInput & string)[];
 	absolutePathErrorMessage?: string;
 	validate: (value: unknown) => value is TInput;
-	execute: (input: TInput) => Promise<string>;
+	execute: (input: TInput, context: ToolExecutionContext) => Promise<string>;
 };
 
 type ToolExecutionError = {
@@ -79,22 +94,22 @@ type RuntimeToolEntry = {
 	absolutePathKeys?: readonly string[];
 	absolutePathErrorMessage?: string;
 	validate: (value: unknown) => value is ToolInput;
-	execute: (input: ToolInput) => Promise<string>;
+	execute: (input: ToolInput, context: ToolExecutionContext) => Promise<string>;
 };
 
 function defineTool<TInput extends ToolInput>(entry: ToolEntry<TInput>): RuntimeToolEntry {
 	return {
 		...entry,
 		validate: (value: unknown): value is ToolInput => entry.validate(value),
-		execute: (input: ToolInput) => entry.execute(input as TInput),
+		execute: (input: ToolInput, context: ToolExecutionContext) => entry.execute(input as TInput, context),
 	};
 }
 
 function runWithMessage<TInput extends ToolInput>(
 	action: (input: TInput) => Promise<void>,
 	message: (input: TInput) => string
-): (input: TInput) => Promise<string> {
-	return async (input: TInput) => {
+): (input: TInput, context: ToolExecutionContext) => Promise<string> {
+	return async (input: TInput, _context: ToolExecutionContext) => {
 		await action(input);
 		return message(input);
 	};
@@ -129,7 +144,11 @@ const toolEntries = [
 		},
 		invalidArgumentsMessage: 'Invalid arguments for gandr',
 		validate: isWeaveGandrInput,
-		execute: async (input: WeaveGandrInput) => runClaudeTask(input),
+		execute: async (input: WeaveGandrInput, context: ToolExecutionContext) =>
+			runClaudeTask(input, {
+				logger: context.logger,
+				claudeTimeoutMs: context.claudeTimeoutMs,
+			}),
 	}),
 	defineTool({
 		definition: {
@@ -152,6 +171,36 @@ const toolEntries = [
 		absolutePathErrorMessage: 'read_file requires an absolute path',
 		validate: isReadFileInput,
 		execute: async (input: ReadFileInput) => readFileFromWSL(input.path),
+	}),
+	defineTool({
+		definition: {
+			name: 'read_file_range',
+			description:
+				'Read a specific inclusive line range from a file in the WSL filesystem directly. Use for large files and logs when a full read would be wasteful. Returns the selected lines prefixed with line numbers.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					path: {
+						type: 'string',
+						description: 'Absolute path to the file inside WSL.',
+					},
+					start_line: {
+						type: 'number',
+						description: 'First line number to include. Must be a positive integer.',
+					},
+					end_line: {
+						type: 'number',
+						description: 'Last line number to include. Must be a positive integer and at least start_line.',
+					},
+				},
+				required: ['path', 'start_line', 'end_line'],
+			},
+		},
+		invalidArgumentsMessage: 'Invalid arguments for read_file_range',
+		absolutePathKeys: ['path'],
+		absolutePathErrorMessage: 'read_file_range requires an absolute path',
+		validate: isReadFileRangeInput,
+		execute: async (input: ReadFileRangeInput) => readFileRangeFromWSL(input.path, input.start_line, input.end_line),
 	}),
 	defineTool({
 		definition: {
@@ -304,6 +353,28 @@ const toolEntries = [
 		absolutePathErrorMessage: 'file_exists requires an absolute path',
 		validate: isFileExistsInput,
 		execute: async (input: FileExistsInput) => ((await fileExistsInWSL(input.path)) ? 'true' : 'false'),
+	}),
+	defineTool({
+		definition: {
+			name: 'stat_path',
+			description:
+				'Inspect a file, directory, or symlink in the WSL filesystem directly. Returns structured JSON text describing whether the path exists and, if it does, its kind, size, mtime, mode, and symlink metadata.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					path: {
+						type: 'string',
+						description: 'Absolute path to inspect inside WSL.',
+					},
+				},
+				required: ['path'],
+			},
+		},
+		invalidArgumentsMessage: 'Invalid arguments for stat_path',
+		absolutePathKeys: ['path'],
+		absolutePathErrorMessage: 'stat_path requires an absolute path',
+		validate: isStatPathInput,
+		execute: async (input: StatPathInput) => statPathInWSL(input.path),
 	}),
 	defineTool({
 		definition: {
@@ -473,21 +544,78 @@ const toolEntries = [
 		validate: isSearchFilesInput,
 		execute: async (input: SearchFilesInput) => searchFilesInWSL(input.path, input.pattern),
 	}),
+	defineTool({
+		definition: {
+			name: 'grep_content',
+			description:
+				'Search file contents under a file or directory in the WSL filesystem. Returns matches as path:line:content. Supports optional glob filtering, case sensitivity, regex mode, and result limiting. Use for fast direct text search instead of weaving through Gandr.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					path: {
+						type: 'string',
+						description: 'Absolute path to a file or directory inside WSL to search within.',
+					},
+					pattern: {
+						type: 'string',
+						description: 'Pattern to search for in file contents.',
+					},
+					glob: {
+						type: 'string',
+						description: 'Optional glob to restrict filenames searched (e.g. "*.ts", "*.md").',
+					},
+					case_sensitive: {
+						type: 'boolean',
+						description: 'Whether matching should be case-sensitive. Defaults to false.',
+					},
+					is_regex: {
+						type: 'boolean',
+						description: 'Whether pattern should be treated as a regular expression. Defaults to false.',
+					},
+					max_results: {
+						type: 'number',
+						description: 'Optional maximum number of matching lines to return. Must be a positive integer.',
+					},
+				},
+				required: ['path', 'pattern'],
+			},
+		},
+		invalidArgumentsMessage: 'Invalid arguments for grep_content',
+		absolutePathKeys: ['path'],
+		absolutePathErrorMessage: 'grep_content requires an absolute path',
+		validate: isGrepContentInput,
+		execute: async (input: GrepContentInput) =>
+			grepContentInWSL({
+				path: input.path,
+				pattern: input.pattern,
+				glob: input.glob,
+				caseSensitive: input.case_sensitive,
+				isRegex: input.is_regex,
+				maxResults: input.max_results,
+			}),
+	}),
 ] as const;
 
 const toolEntryByName = new Map(toolEntries.map((entry) => [entry.definition.name, entry]));
 
 export const TOOL_DEFINITIONS = toolEntries.map((entry) => entry.definition);
 
-export async function executeToolCall(params: ToolCallParams): Promise<ToolExecutionOutcome> {
+export async function executeToolCall(
+	params: ToolCallParams,
+	context: ToolExecutionContext
+): Promise<ToolExecutionOutcome> {
 	const entry = toolEntryByName.get(params.name);
 	if (!entry) {
 		return invalidToolCall(`Unknown tool: ${params.name}`);
 	}
-	return runToolEntry(entry, params.arguments);
+	return runToolEntry(entry, params.arguments, context);
 }
 
-async function runToolEntry(entry: RuntimeToolEntry, rawArguments: unknown): Promise<ToolExecutionOutcome> {
+async function runToolEntry(
+	entry: RuntimeToolEntry,
+	rawArguments: unknown,
+	context: ToolExecutionContext
+): Promise<ToolExecutionOutcome> {
 	if (!entry.validate(rawArguments)) {
 		return invalidToolCall(entry.invalidArgumentsMessage);
 	}
@@ -498,7 +626,7 @@ async function runToolEntry(entry: RuntimeToolEntry, rawArguments: unknown): Pro
 	}
 
 	try {
-		return toolResult(await entry.execute(rawArguments));
+		return toolResult(await entry.execute(rawArguments, context));
 	} catch (err) {
 		return toolResult(err instanceof Error ? err.message : String(err), true);
 	}

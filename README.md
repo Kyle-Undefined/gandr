@@ -69,11 +69,11 @@ The installer will:
 
 1. Detect your WSL architecture
 2. Build the matching Linux binary
-3. Install it to `~/.local/bin/gandr`
+3. Install the `gandr` binary to `~/.local/bin/gandr` and the `gandr-weaver` wrapper to `~/.local/bin/gandr-weaver`
 4. Print the `gandr` MCP server entry to add to `%APPDATA%\Claude\claude_desktop_config.json`
 5. Print the installed version
 
-Then add or update that `gandr` entry in Claude Desktop's config manually.
+Then add or update that `gandr` entry in Claude Desktop's config manually. The printed config points Claude Desktop at `gandr-weaver`, which loads your WSL shell environment and then execs `gandr`.
 
 You can rerun the installer to update Gandr even while Claude Desktop is open. The install should still succeed, but Claude Desktop must be fully restarted before it picks up the new binary.
 
@@ -98,9 +98,11 @@ curl -fsSL "https://github.com/kyle-undefined/gandr/releases/download/${VERSION}
 
 That installs the exact version you specify and still verifies against `gandr-checksums.txt`.
 
-The installer prints the `gandr` MCP server entry you should add to `%APPDATA%\Claude\claude_desktop_config.json`.
+The installer prints the `gandr` MCP server entry you should add to `%APPDATA%\Claude\claude_desktop_config.json`. That entry targets `~/.local/bin/gandr-weaver`, which then execs the installed `gandr` binary.
 
 You can rerun the installer to update Gandr even while Claude Desktop is open. The install should still succeed, but Claude Desktop must be fully restarted before it picks up the new binary.
+
+Optional Gandr runtime flags such as debug logging and a Claude child timeout are configured in Claude Desktop's MCP server args, not in Claude Desktop itself.
 
 ## Quick start
 
@@ -112,6 +114,32 @@ You can rerun the installer to update Gandr even while Claude Desktop is open. T
 
 Once installed, Gandr is mostly transparent. You keep using Claude Desktop normally, and execution gets routed into WSL through Claude Code.
 
+If you want to add optional Gandr flags, the config shape looks like:
+
+```json
+{
+	"mcpServers": {
+		"gandr": {
+			"command": "wsl.exe",
+			"args": [
+				"-d",
+				"Ubuntu",
+				"--",
+				"/home/you/.local/bin/gandr-weaver",
+				"--log-level",
+				"debug",
+				"--claude-timeout-ms",
+				"3600000"
+			]
+		}
+	}
+}
+```
+
+Use `gandr-weaver` in Claude Desktop config, not `gandr` directly. The installer creates both: `gandr` is the actual binary, and `gandr-weaver` is the wrapper Claude Desktop launches through `wsl.exe`.
+
+`--claude-timeout-ms` is a Gandr server option passed through Claude Desktop config. It is not a native Claude Desktop timeout setting.
+
 ## Exposed tools
 
 ### Bridge
@@ -122,21 +150,24 @@ Once installed, Gandr is mostly transparent. You keep using Claude Desktop norma
 
 ### Direct (no Claude Code needed)
 
-| Tool            | Description                                            |
-| --------------- | ------------------------------------------------------ |
-| `read_file`     | Read a file from the WSL filesystem                    |
-| `write_file`    | Write or overwrite a file in the WSL filesystem        |
-| `append_file`   | Append content to a file (creates if missing)          |
-| `patch_file`    | Replace a unique string in a file (exactly-once match) |
-| `list_dir`      | List directory contents                                |
-| `delete_file`   | Delete a file                                          |
-| `delete_dir`    | Delete a directory recursively                         |
-| `move_file`     | Move or rename a file or directory                     |
-| `file_exists`   | Check whether a file or directory exists               |
-| `create_dir`    | Create a directory (recursive)                         |
-| `copy_file`     | Copy a file                                            |
-| `read_dir_tree` | Recursively list a directory tree with file sizes      |
-| `search_files`  | Search for files matching a glob pattern recursively   |
+| Tool              | Description                                            |
+| ----------------- | ------------------------------------------------------ |
+| `read_file`       | Read a file from the WSL filesystem                    |
+| `read_file_range` | Read a specific line range from a file                 |
+| `write_file`      | Write or overwrite a file in the WSL filesystem        |
+| `append_file`     | Append content to a file (creates if missing)          |
+| `patch_file`      | Replace a unique string in a file (exactly-once match) |
+| `list_dir`        | List directory contents                                |
+| `delete_file`     | Delete a file                                          |
+| `delete_dir`      | Delete a directory recursively                         |
+| `move_file`       | Move or rename a file or directory                     |
+| `file_exists`     | Check whether a file or directory exists               |
+| `stat_path`       | Inspect file, directory, or symlink metadata           |
+| `create_dir`      | Create a directory (recursive)                         |
+| `copy_file`       | Copy a file                                            |
+| `read_dir_tree`   | Recursively list a directory tree with file sizes      |
+| `search_files`    | Search for files matching a glob pattern recursively   |
+| `grep_content`    | Search file contents under a file or directory         |
 
 Claude Desktop handles the MCP calls itself. In normal use, you do not manually invoke these tools.
 
@@ -198,6 +229,49 @@ Expected output:
 ```text
 ok
 ```
+
+### Doctor
+
+You can run a local WSL diagnostic with:
+
+```bash
+gandr --doctor
+```
+
+The doctor command checks:
+
+- `claude` resolves on your WSL `PATH`
+- `claude --version` runs
+- `claude auth status --json` reports a logged-in session
+- your local Gandr install paths look consistent if present
+
+`gandr --doctor` is intentionally WSL-local. It does not inspect Claude Desktop's Windows config, and it does not attempt a live model call.
+
+### Long-running Claude tasks
+
+Gandr does not enforce a Claude child timeout by default.
+
+If you want one, pass `--claude-timeout-ms` in the Claude Desktop MCP server args. On timeout, Gandr first sends `SIGTERM`, waits briefly, and only then escalates to `SIGKILL` if Claude is still running.
+
+### Debug logging
+
+Gandr debug logging is controlled by Gandr, not Claude Code.
+
+Use `--log-level debug` in the Claude Desktop MCP server args to enable debug logs. Gandr writes those logs to `stderr` and keeps MCP protocol traffic on `stdout`.
+
+If `--log-level` is set, Gandr also writes the same filtered logs to the standard Linux/WSL state location:
+
+```text
+~/.local/state/gandr/gandr.log
+```
+
+If `XDG_STATE_HOME` is set, Gandr uses:
+
+```text
+$XDG_STATE_HOME/gandr/gandr.log
+```
+
+The file is append-only. If you run Gandr in a long-lived wrapper or service, configure external rotation such as `logrotate`.
 
 ## Development
 

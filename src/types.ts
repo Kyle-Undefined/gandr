@@ -122,6 +122,23 @@ export function isReadFileInput(value: unknown): value is ReadFileInput {
 	return !!v && isNonEmptyString(v.path);
 }
 
+export type ReadFileRangeInput = {
+	path: string;
+	start_line: number;
+	end_line: number;
+};
+
+export function isReadFileRangeInput(value: unknown): value is ReadFileRangeInput {
+	const v = asRecord(value);
+	if (!v || !isNonEmptyString(v.path)) {
+		return false;
+	}
+	if (!isIntegerInRange(v.start_line, 1) || !isIntegerInRange(v.end_line, 1)) {
+		return false;
+	}
+	return v.end_line >= v.start_line;
+}
+
 export type WriteFileInput = {
 	path: string;
 	content: string;
@@ -174,6 +191,15 @@ export type FileExistsInput = {
 };
 
 export function isFileExistsInput(value: unknown): value is FileExistsInput {
+	const v = asRecord(value);
+	return !!v && isNonEmptyString(v.path);
+}
+
+export type StatPathInput = {
+	path: string;
+};
+
+export function isStatPathInput(value: unknown): value is StatPathInput {
 	const v = asRecord(value);
 	return !!v && isNonEmptyString(v.path);
 }
@@ -243,6 +269,35 @@ export type SearchFilesInput = {
 export function isSearchFilesInput(value: unknown): value is SearchFilesInput {
 	const v = asRecord(value);
 	return !!v && isNonEmptyString(v.path) && isNonEmptyString(v.pattern);
+}
+
+export type GrepContentInput = {
+	path: string;
+	pattern: string;
+	glob?: string;
+	case_sensitive?: boolean;
+	is_regex?: boolean;
+	max_results?: number;
+};
+
+export function isGrepContentInput(value: unknown): value is GrepContentInput {
+	const v = asRecord(value);
+	if (!v || !isNonEmptyString(v.path) || !isNonEmptyString(v.pattern)) {
+		return false;
+	}
+	if (v.glob !== undefined && !isNonEmptyString(v.glob)) {
+		return false;
+	}
+	if (v.case_sensitive !== undefined && typeof v.case_sensitive !== 'boolean') {
+		return false;
+	}
+	if (v.is_regex !== undefined && typeof v.is_regex !== 'boolean') {
+		return false;
+	}
+	if (v.max_results !== undefined && !isIntegerInRange(v.max_results, 1)) {
+		return false;
+	}
+	return true;
 }
 
 // ─── Claude Stream JSON Types ─────────────────────────────────────────────────
