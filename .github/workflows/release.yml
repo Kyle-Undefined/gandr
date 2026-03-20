@@ -130,7 +130,9 @@ jobs:
 
       - name: Render pinned installer
         run: |
-          sed "s|__GANDR_RELEASE_REF__|${GITHUB_REF_NAME}|g" install.sh > dist/install.sh
+          sed -e "s|__GANDR_RELEASE_REF__|${GITHUB_REF_NAME}|g" \
+              -e "s|__GANDR_IS_RELEASE__|true|g" \
+              install.sh > dist/install.sh
           chmod +x dist/install.sh
 
       - name: Publish release

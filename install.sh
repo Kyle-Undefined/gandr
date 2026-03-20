@@ -9,7 +9,8 @@ RELEASE_REF="${GANDR_VERSION:-__GANDR_RELEASE_REF__}"
 TEMP_FILES=()
 GANDR_WAS_BUSY=0
 
-if [ "$RELEASE_REF" = "__GANDR_RELEASE_REF__" ]; then
+GANDR_IS_RELEASE="__GANDR_IS_RELEASE__"
+if [ "$GANDR_IS_RELEASE" != "true" ]; then
     echo "[gandr] install.sh is a release-installer template." >&2
     echo "[gandr] Use install.local.sh for local development, or run the release-hosted install.sh asset." >&2
     echo "[gandr] You can also set GANDR_VERSION explicitly when testing this template." >&2
